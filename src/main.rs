@@ -1,3 +1,10 @@
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::collections::HashMap;
+use std::thread;
+use std::thread::sleep;
+use std::time;
+
 macro_rules! ArMu_new {
     ($wrapped:expr) => (
         Arc::new(Mutex::new($wrapped))
@@ -7,20 +14,27 @@ macro_rules! ArMu_new {
 type ArMu<T> = Arc<Mutex<T>>;
 
 pub struct DataStore {
-    pub num: Mutex<i32>,
+    pub num: i32,
     pub data: HashMap<String, i32>,
 }
 
 impl DataStore {
-    pub fn new(sd: HashMap<String,i32>) -> DataStore {
+    pub fn new() -> DataStore {
         let sd = HashMap::new();
-        DataStore {num: ArMu_new(0), data: sd}
+        DataStore {num: 0, data: sd}
     }
 }
 
 pub struct DataStoreWrapper {
     num: Mutex<i32>,
-    ds: Mutex<DataStore>,
+    ds: ArMu<DataStore>,
+}
+
+impl DataStoreWrapper {
+    pub fn new(ds: ArMu<DataStore>) -> DataStoreWrapper {
+        let num = 0;
+        DataStoreWrapper {num: Mutex::new(num), ds: ds}
+    }
 }
 
 pub struct Hoge{
@@ -30,42 +44,65 @@ pub struct Hoge{
 
 impl Hoge {
     pub fn new(dsw: Arc<DataStoreWrapper>) -> Hoge {
-        let hoge = Hoge {num: ArMu_new(0), ds: dsw};
+        let num = 0;
+        let hoge = Hoge {num: Mutex::new(num), dsw: dsw};
         return hoge
     }
 }
 
 pub struct Fuga{
     pub num: Mutex<i32>,
-    pub ds: Arc<DataStoreWrapper>,
+    pub dsw: Arc<DataStoreWrapper>,
 }
 
 impl Fuga {
     pub fn new(dsw: Arc<DataStoreWrapper>) -> Fuga {
-        let fuga = Hoge {num: ArMu_new(0), ds: dsw};
+        let num = 0;
+        let fuga = Fuga {num: Mutex::new(num), dsw: dsw};
         return fuga
     }
 }
 
 fn main(){
-    let hmap = HashMap::new();
-    let wrapHmap = ArMu_new!(hmap);
-    let ds = DataStore::new(wrapHmap);
-    let dsw = DataStoreWrapper{num: ArMu_new(0), ds: ArMu_new(ds)};
+    let ds = DataStore::new();
+    let ads = ArMu_new!(ds);
+    let dsw = DataStoreWrapper::new(ads);
     let adsw = Arc::new(dsw);
 
-    let hoge = Hoge::new(adsw);
+    let hoge = Hoge::new(adsw.clone());
+    let fuga = Fuga::new(adsw.clone());
+
+    let hoge1 = Arc::new(hoge);
+    let hoge2 = hoge1.clone();
+
+    let fuga1 = Arc::new(fuga);
+    let fuga2 = fuga1.clone();
 
 
     let handle1 = thread::spawn(move || {
-        hoge.dsw.ds.lock().unwrap().data.insert("hoge", 1);
-        let mut ds = dsw.lock().unwrap();
-        let mut num = ds.num.lock().unwrap();
-        *num += 1;
+        let mut num = 0;        
+        loop {            
+            hoge1.dsw.ds.lock().unwrap().data.insert("hoge".to_string() + &&num.to_string(), num);
+            let mut numLocal = fuga1.dsw.num.lock().unwrap();
+            *numLocal += 1;
+            num += 1;
+            println!("num of thread1: {}", *numLocal);
+            println!("thread1");
+            sleep(time::Duration::from_secs(1));
+        }
     });
 
     let handle2 = thread::spawn(move || {
-        fuga.dsw.ds.lock().unwrap().data.insert("fuga", 1);
+        let mut num = 0;
+        loop {            
+            fuga2.dsw.ds.lock().unwrap().data.insert("fuga".to_string() + &num.to_string(), num);
+            let mut numLocal = hoge2.dsw.num.lock().unwrap();
+            *numLocal += 1;
+            num += 1;
+            println!("thread2");
+            println!("num of thread2: {}", *numLocal);
+            sleep(time::Duration::from_secs(1));
+        }
     });
 
     let mut thread_handles = vec![];
